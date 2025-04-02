@@ -1,10 +1,10 @@
-
 import streamlit as st
 import pandas as pd
 import difflib
 import numpy as np
 import re
 import io
+from datetime import datetime
 
 # 내장 데이터: H.xlsx
 h_data = {
@@ -39,7 +39,7 @@ def process(df_s):
     h_names = df_h["출고상품명"].apply(normalize)
     s_names = df_s["ITEM_NAME"].fillna("").apply(normalize)
 
-    sim_matrix = np.zeros((len(h_names), len(s_names)))  # typo fix 'sames' to 's_names'
+    sim_matrix = np.zeros((len(h_names), len(s_names)))
     for i, h in enumerate(h_names):
         for j, s in enumerate(s_names):
             sim_matrix[i, j] = difflib.SequenceMatcher(None, h, s).ratio()
@@ -82,6 +82,9 @@ def to_excel_bytes(df):
         df.to_excel(writer, index=False)
     return output.getvalue()
 
+def get_today_prefix():
+    return datetime.today().strftime("%y%m%d")
+
 st.title("📦 S.XLSX 자동 매핑 웹 툴")
 
 uploaded_file = st.file_uploader("S.XLSX 파일을 업로드하세요", type="xlsx")
@@ -92,10 +95,18 @@ if uploaded_file:
 
     st.success("🎉 매핑 및 처리 완료!")
 
-    st.subheader("📋 업데이트된 S 파일")
+    st.subheader("📋 주문등록양식")
     st.dataframe(df_s_result)
-    st.download_button("📥 Updated_S.xlsx 다운로드", to_excel_bytes(df_s_result), file_name="Updated_S_Result.xlsx")
+    st.download_button(
+        "📥 RINCOS_온드_주문등록양식_큐텐 다운로드",
+        to_excel_bytes(df_s_result),
+        file_name=f"{get_today_prefix()}_RINCOS_온드_주문등록양식_큐텐.xlsx"
+    )
 
-    st.subheader("📋 업데이트된 DR 파일")
+    st.subheader("📋 HIVE센터 B2C 출고요청양식")
     st.dataframe(df_dr_result)
-    st.download_button("📥 Updated_DR.xlsx 다운로드", to_excel_bytes(df_dr_result), file_name="Updated_DR_Result.xlsx")
+    st.download_button(
+        "📥 RINCOS_온드_HIVE센터 B2C 출고요청양식 다운로드",
+        to_excel_bytes(df_dr_result),
+        file_name=f"{get_today_prefix()}_RINCOS_온드_HIVE센터 B2C 출고요청양식.xlsx"
+    )
