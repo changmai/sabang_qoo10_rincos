@@ -34,6 +34,12 @@ def remove_brackets(text):
         return text
     return re.sub(r'\[[^\]]*\]', '', str(text))
 
+def format_postal_code(code):
+    if pd.isna(code):
+        return code
+    code_str = str(code).strip().replace("-", "")
+    return f"{code_str[:3]}-{code_str[3:]}" if len(code_str) == 7 else code
+
 def process(df_s):
     df_s = df_s.copy()
     h_names = df_h["출고상품명"].apply(normalize)
@@ -57,6 +63,11 @@ def process(df_s):
     df_s["ITEM_ORIGIN"] = df_s.apply(lambda row: "1" if row.drop("ITEM_ORIGIN").notna().any() else row["ITEM_ORIGIN"], axis=1)
     df_s["상품 브랜드명"] = df_s.apply(lambda row: "KR" if row.drop("상품 브랜드명").notna().any() else row["상품 브랜드명"], axis=1)
     df_s["통관고유부호"] = df_s.apply(lambda row: "JPY" if row.drop("통관고유부호").notna().any() else row["통관고유부호"], axis=1)
+
+    # 추가 요청 사항 반영
+    if "CONSIGNEE_ POSTALCODE" in df_s.columns:
+        df_s["CONSIGNEE_ POSTALCODE"] = df_s["CONSIGNEE_ POSTALCODE"].apply(format_postal_code)
+    df_s["PKG"] = 1
 
     df_dr_updated = df_dr.copy()
     df_dr_updated["Ref_No (주문번호)"] = df_s["Order_No"]
