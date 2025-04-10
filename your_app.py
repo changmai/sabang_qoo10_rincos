@@ -84,6 +84,16 @@ if s_file:
     df_S_updated['item_origin'] = df_S_updated.apply(lambda row: 'KR' if row.dropna().shape[0] > 1 else row['item_origin'], axis=1)
     df_S_updated['currency'] = df_S_updated.apply(lambda row: 'JPY' if row.dropna().shape[0] > 1 else row['currency'], axis=1)
 
+    # 우편번호 포맷 변경: 7자리 숫자 → XXX-XXXX
+    def format_postal(postal):
+        if isinstance(postal, (int, float)):
+            postal = str(int(postal))
+        if isinstance(postal, str) and postal.isdigit() and len(postal) == 7:
+            return f"{postal[:3]}-{postal[3:]}"
+        return postal
+
+    df_S_updated['consignee_ postalcode'] = df_S_updated['consignee_ postalcode'].apply(format_postal)
+
     # DR 생성
     dr_columns = ['ref_no (주문번호)', '하이브 상품코드', '상품명', '수량', '바코드']
     df_DR = pd.DataFrame(columns=dr_columns)
