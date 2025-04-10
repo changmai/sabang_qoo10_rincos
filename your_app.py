@@ -3,6 +3,7 @@ import pandas as pd
 from difflib import SequenceMatcher
 import re
 from io import BytesIO
+from datetime import datetime
 
 st.set_page_config(page_title="DR 자동 생성기", layout="wide")
 st.title("📦 DR.XLSX 자동 생성 프로그램")
@@ -101,14 +102,27 @@ if s_file:
     st.success("🎉 DR 파일 생성 완료!")
     st.dataframe(df_DR.head())
 
-    # 다운로드 링크 생성
-    towrite = BytesIO()
-    df_DR.to_excel(towrite, index=False)
-    towrite.seek(0)
+    today = datetime.today().strftime('%y%m%d')
+
+    # S 파일 다운로드 버튼
+    s_output = BytesIO()
+    df_S_updated.to_excel(s_output, index=False)
+    s_output.seek(0)
     st.download_button(
-        label="📥 DR.XLSX 다운로드",
-        data=towrite,
-        file_name="DR_final_result.xlsx",
+        label="📥 RINCOS_온드_주문등록양식_큐텐 다운로드",
+        data=s_output,
+        file_name=f"{today}_RINCOS_온드_주문등록양식_큐텐.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # DR 파일 다운로드 버튼
+    dr_output = BytesIO()
+    df_DR.to_excel(dr_output, index=False)
+    dr_output.seek(0)
+    st.download_button(
+        label="📥 RINCOS_온드_HIVE센터 B2C 출고요청양식 다운로드",
+        data=dr_output,
+        file_name=f"{today}_RINCOS_온드_HIVE센터 B2C 출고요청양식.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
