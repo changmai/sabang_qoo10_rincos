@@ -1,123 +1,115 @@
 import streamlit as st
 import pandas as pd
-import difflib
-import numpy as np
+from difflib import SequenceMatcher
 import re
-import io
-from datetime import datetime
+from io import BytesIO
 
-# 내장 데이터: H.xlsx
-h_data = {
-    "출고상품명": ["아워 글로우 립 11 멜로우", "아워 글로우 립 15 윈디아"],
-    "상품코드": ["O00100009", "O00100026"],
-    "바코드": ["8809738598740", "8809864768703"],
-    "URL": ["https://www.qoo10.jp/g/982447114/", "https://www.qoo10.jp/g/982447114/"],
-    "UNIT_TOTAL PRICE": [1954, 1954]
-}
-df_h = pd.DataFrame(h_data)
+st.set_page_config(page_title="DR 자동 생성기", layout="wide")
+st.title("📦 DR.XLSX 자동 생성 프로그램")
 
-# 내장 데이터: DR.xlsx
-init_dr = {
-    "Ref_No (주문번호)": ["1045038359", "1045038359"],
-    "하이브 상품코드": ["", ""],
-    "상품명": ["", ""],
-    "수량": ["", ""],
-    "바코드": ["", ""]
-}
-df_dr = pd.DataFrame(init_dr)
+# 불필요한 텍스트 제거 함수
+def clean_text(text):
+    if not isinstance(text, str):
+        return ""
+    patterns = [
+        r'#.*?セット', r'【.*?】', r'/.*?', r'韓コスメ', r'口紅', r'リップ', r'アワグロウ',
+        r'[\[\]【】#]', r'\s{2,}'
+    ]
+    for pattern in patterns:
+        text = re.sub(pattern, '', text)
+    return re.sub(r'\s+', '', text.strip())
 
-def normalize(text):
-    return str(text).lower().replace(" ", "") if pd.notna(text) else ""
+# 유사도 기반 매핑 함수
+def match_items(source_list, target_list):
+    mapping = {}
+    for i, src in enumerate(source_list):
+        best_score = 0
+        best_match = None
+        for j, tgt in enumerate(target_list):
+            score = SequenceMatcher(None, src, tgt).ratio()
+            if score > 0.3 and score > best_score:
+                best_score = score
+                best_match = j
+        if best_match is not None:
+            mapping[i] = best_match
+    return mapping
 
-def remove_brackets(text):
-    if pd.isna(text):
-        return text
-    return re.sub(r'\[[^\]]*\]', '', str(text))
+# 기본 내재화된 H 데이터
+@st.cache_data
+def load_default_h():
+    return pd.read_excel("H.xlsx")
 
-def format_postal_code(code):
-    if pd.isna(code):
-        return code
-    code_str = str(code).strip().replace("-", "")
-    return f"{code_str[:3]}-{code_str[3:]}" if len(code_str) == 7 else code
+# H 데이터 로딩
+st.sidebar.header("H.XLSX 관리")
+use_default_h = st.sidebar.checkbox("기본 내재화된 H.XLSX 사용", value=True)
 
-def process(df_s):
-    df_s = df_s.copy()
-    h_names = df_h["출고상품명"].apply(normalize)
-    s_names = df_s["ITEM_NAME"].fillna("").apply(normalize)
+if use_default_h:
+    df_H = load_default_h()
+else:
+    h_file = st.sidebar.file_uploader("H.XLSX 파일 업로드", type=["xlsx"])
+    if h_file:
+        df_H = pd.read_excel(h_file)
+    else:
+        st.warning("H.XLSX 파일을 업로드하거나 기본 파일을 사용해주세요.")
+        st.stop()
 
-    sim_matrix = np.zeros((len(h_names), len(s_names)))
-    for i, h in enumerate(h_names):
-        for j, s in enumerate(s_names):
-            sim_matrix[i, j] = difflib.SequenceMatcher(None, h, s).ratio()
+# S 파일 업로드
+st.subheader("1단계: S.XLSX 파일 업로드")
+s_file = st.file_uploader("S.XLSX 파일을 업로드하세요", type=["xlsx"])
+if s_file:
+    df_S = pd.read_excel(s_file)
+    df_S.columns = df_S.columns.str.lower()
+    df_H.columns = df_H.columns.str.lower()
 
-    match_indexes = [(i, j) for i in range(len(h_names)) for j in range(len(s_names)) if sim_matrix[i, j] >= 0.3]
+    # 전처리
+    s_item_names_raw = df_S['item_name'].fillna('').tolist()
+    s_item_names_clean = [clean_text(name) for name in s_item_names_raw]
+    h_names_clean = [clean_text(name) for name in df_H['출고상품명'].fillna('')]
 
-    for h_idx, s_idx in match_indexes:
-        df_s.at[s_idx, "상품 Shoppingmall URL"] = df_h.at[h_idx, "URL"]
-        df_s.at[s_idx, "UNIT_TOTAL PRICE"] = df_h.at[h_idx, "UNIT_TOTAL PRICE"]
+    # 매핑
+    s_to_h_map = match_items(s_item_names_clean, h_names_clean)
 
-    df_s["Order_No"] = df_s["Order_No"].apply(lambda x: f"86{x}" if pd.notna(x) and not str(x).startswith("86") else x)
-    df_s["Service code"] = df_s.apply(lambda row: "99" if row.drop("Service code").notna().any() else row["Service code"], axis=1)
-    df_s["CONSIGNEE_국가코드"] = df_s.apply(lambda row: "JP" if row.drop("CONSIGNEE_국가코드").notna().any() else row["CONSIGNEE_국가코드"], axis=1)
-    df_s["CONSIGNEE_ADDRESS (EN)_JP지역 현지어 기재"] = df_s["CONSIGNEE_ADDRESS (EN)_JP지역 현지어 기재"].apply(remove_brackets)
-    df_s["ITEM_ORIGIN"] = df_s.apply(lambda row: "1" if row.drop("ITEM_ORIGIN").notna().any() else row["ITEM_ORIGIN"], axis=1)
-    df_s["상품 브랜드명"] = df_s.apply(lambda row: "KR" if row.drop("상품 브랜드명").notna().any() else row["상품 브랜드명"], axis=1)
-    df_s["통관고유부호"] = df_s.apply(lambda row: "JPY" if row.drop("통관고유부호").notna().any() else row["통관고유부호"], axis=1)
+    # S 업데이트
+    df_S_updated = df_S.copy()
+    for s_idx, h_idx in s_to_h_map.items():
+        df_S_updated.at[s_idx, '상품 shoppingmall url'] = df_H.at[h_idx, '상품 shoppingmall url']
+        df_S_updated.at[s_idx, 'unit_total price'] = df_H.at[h_idx, 'unit_total price']
 
-    # 추가 요청 사항 반영
-    if "CONSIGNEE_ POSTALCODE" in df_s.columns:
-        df_s["CONSIGNEE_ POSTALCODE"] = df_s["CONSIGNEE_ POSTALCODE"].apply(format_postal_code)
-    df_s["PKG"] = 1
+    df_S_updated['order_no'] = df_S_updated['order_no'].astype(str).apply(lambda x: '86' + x if not x.startswith('86') else x)
+    df_S_updated['service code'] = df_S_updated.apply(lambda row: '99' if row.dropna().shape[0] > 1 else row['service code'], axis=1)
+    df_S_updated['consignee_국가코드'] = df_S_updated.apply(lambda row: 'JP' if row.dropna().shape[0] > 1 else row['consignee_국가코드'], axis=1)
+    df_S_updated['consignee_address (en)_jp지역 현지어 기재'] = df_S_updated['consignee_address (en)_jp지역 현지어 기재'].apply(lambda x: re.sub(r'\[.*?\]', '', x) if isinstance(x, str) else x)
+    df_S_updated['pkg'] = df_S_updated.apply(lambda row: '1' if row.dropna().shape[0] > 1 else row['pkg'], axis=1)
+    df_S_updated['item_origin'] = df_S_updated.apply(lambda row: 'KR' if row.dropna().shape[0] > 1 else row['item_origin'], axis=1)
+    df_S_updated['currency'] = df_S_updated.apply(lambda row: 'JPY' if row.dropna().shape[0] > 1 else row['currency'], axis=1)
 
-    df_dr_updated = df_dr.copy()
-    df_dr_updated["Ref_No (주문번호)"] = df_s["Order_No"]
-    df_dr_updated["상품명"] = df_s["ITEM_NAME"]
-    df_dr_updated["수량"] = df_s["ITEM_PCS"]
+    # DR 생성
+    dr_columns = ['ref_no (주문번호)', '하이브 상품코드', '상품명', '수량', '바코드']
+    df_DR = pd.DataFrame(columns=dr_columns)
+    df_DR['ref_no (주문번호)'] = df_S_updated['order_no']
+    df_DR['상품명'] = df_S_updated['item_name']
+    df_DR['수량'] = df_S_updated['item_pcs']
 
-    dr_names = df_dr_updated["상품명"].apply(normalize)
-    h_names = df_h["출고상품명"].apply(normalize)
+    # DR 매핑 및 덮어쓰기
+    dr_clean = [clean_text(str(x)) for x in df_DR['상품명'].fillna('')]
+    dr_to_h_map = match_items(dr_clean, h_names_clean)
+    for dr_idx, h_idx in dr_to_h_map.items():
+        df_DR.at[dr_idx, '하이브 상품코드'] = df_H.at[h_idx, '상품코드']
+        df_DR.at[dr_idx, '바코드'] = df_H.at[h_idx, '바코드']
+        df_DR.at[dr_idx, '상품명'] = df_H.at[h_idx, '출고상품명']
 
-    for i, dr_name in enumerate(dr_names):
-        best_match_idx = np.argmax([difflib.SequenceMatcher(None, dr_name, h).ratio() for h in h_names])
-        best_ratio = difflib.SequenceMatcher(None, dr_name, h_names[best_match_idx]).ratio()
-        if best_ratio >= 0.3:
-            df_dr_updated.at[i, "하이브 상품코드"] = df_h.at[best_match_idx, "상품코드"]
-            df_dr_updated.at[i, "바코드"] = df_h.at[best_match_idx, "바코드"]
-            df_dr_updated.at[i, "상품명"] = df_h.at[best_match_idx, "출고상품명"]
+    st.success("🎉 DR 파일 생성 완료!")
+    st.dataframe(df_DR.head())
 
-    return df_s, df_dr_updated
-
-def to_excel_bytes(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    return output.getvalue()
-
-def get_today_prefix():
-    return datetime.today().strftime("%y%m%d")
-
-st.title("📦 S.XLSX 자동 매핑 웹 툴")
-
-uploaded_file = st.file_uploader("S.XLSX 파일을 업로드하세요", type="xlsx")
-
-if uploaded_file:
-    df_s = pd.read_excel(uploaded_file)
-    df_s_result, df_dr_result = process(df_s)
-
-    st.success("🎉 매핑 및 처리 완료!")
-
-    st.subheader("📋 주문등록양식")
-    st.dataframe(df_s_result)
+    # 다운로드 링크 생성
+    towrite = BytesIO()
+    df_DR.to_excel(towrite, index=False)
+    towrite.seek(0)
     st.download_button(
-        "📥 RINCOS_온드_주문등록양식_큐텐 다운로드",
-        to_excel_bytes(df_s_result),
-        file_name=f"{get_today_prefix()}_RINCOS_온드_주문등록양식_큐텐.xlsx"
+        label="📥 DR.XLSX 다운로드",
+        data=towrite,
+        file_name="DR_final_result.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-    st.subheader("📋 HIVE센터 B2C 출고요청양식")
-    st.dataframe(df_dr_result)
-    st.download_button(
-        "📥 RINCOS_온드_HIVE센터 B2C 출고요청양식 다운로드",
-        to_excel_bytes(df_dr_result),
-        file_name=f"{get_today_prefix()}_RINCOS_온드_HIVE센터 B2C 출고요청양식.xlsx"
-    )
+else:
+    st.info("좌측에서 H.XLSX 설정 후, S.XLSX 파일을 업로드하세요.")
