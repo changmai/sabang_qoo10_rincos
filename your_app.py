@@ -84,13 +84,15 @@ if s_file:
     df_S_updated['item_origin'] = df_S_updated.apply(lambda row: 'KR' if row.dropna().shape[0] > 1 else row['item_origin'], axis=1)
     df_S_updated['currency'] = df_S_updated.apply(lambda row: 'JPY' if row.dropna().shape[0] > 1 else row['currency'], axis=1)
 
-    # 우편번호 포맷 변경: 7자리 숫자 → XXX-XXXX
+    # 우편번호 포맷 변경: 6자리 → 앞에 0 추가, 7자리면 XXX-XXXX, 아니면 '우편번호없음'
     def format_postal(postal):
         if isinstance(postal, (int, float)):
             postal = str(int(postal))
-        if isinstance(postal, str) and postal.isdigit() and len(postal) == 7:
-            return f"{postal[:3]}-{postal[3:]}"
-        return postal
+        if isinstance(postal, str):
+            postal = postal.zfill(7)
+            if postal.isdigit() and len(postal) == 7:
+                return f"{postal[:3]}-{postal[3:]}"
+        return "우편번호없음"
 
     df_S_updated['consignee_ postalcode'] = df_S_updated['consignee_ postalcode'].apply(format_postal)
 
